@@ -1,12 +1,13 @@
 if (!customElements.get('quick-order-list-remove-button')) {
   customElements.define(
     'quick-order-list-remove-button',
-    class QuickOrderListRemoveButton extends BulkAdd {
+    class QuickOrderListRemoveButton extends HTMLElement {
       constructor() {
         super();
         this.addEventListener('click', (event) => {
           event.preventDefault();
-          this.startQueue(this.dataset.index, 0);
+          const quickOrderList = this.closest('quick-order-list');
+          quickOrderList.updateQuantity(this.dataset.index, 0);
         });
       }
     }
@@ -68,10 +69,15 @@ if (!customElements.get('quick-order-list-remove-all-button')) {
 if (!customElements.get('quick-order-list')) {
   customElements.define(
     'quick-order-list',
-    class QuickOrderList extends BulkAdd {
+    class QuickOrderList extends HTMLElement {
       constructor() {
         super();
         this.cart = document.querySelector('cart-drawer');
+        this.actions = {
+          add: 'ADD',
+          update: 'UPDATE',
+        };
+
         this.quickOrderListId = `quick-order-list-${this.dataset.productId}`;
         this.defineInputsAndQuickOrderTable();
 
@@ -139,13 +145,14 @@ if (!customElements.get('quick-order-list')) {
         const inputValue = parseInt(event.target.value);
         const cartQuantity = parseInt(event.target.dataset.cartQuantity);
         const index = event.target.dataset.index;
+        const name = document.activeElement.getAttribute('name');
 
         const quantity = inputValue - cartQuantity;
         this.cleanErrorMessageOnType(event);
         if (inputValue == 0) {
-          this.startQueue(index, inputValue);
+          this.updateQuantity(index, inputValue, name, this.actions.update);
         } else {
-          this.validateQuantity(event, index, inputValue, cartQuantity, quantity);
+          this.validateQuantity(event, name, index, inputValue, cartQuantity, quantity);
         }
       }
 
@@ -156,7 +163,7 @@ if (!customElements.get('quick-order-list')) {
         });
       }
 
-      validateQuantity(event, index, inputValue, cartQuantity, quantity) {
+      validateQuantity(event, name, index, inputValue, cartQuantity, quantity) {
         if (inputValue < event.target.dataset.min) {
           this.setValidity(
             event,
@@ -171,9 +178,9 @@ if (!customElements.get('quick-order-list')) {
           event.target.setCustomValidity('');
           event.target.reportValidity();
           if (cartQuantity > 0) {
-            this.startQueue(index, inputValue);
+            this.updateQuantity(index, inputValue, name, this.actions.update);
           } else {
-            this.startQueue(index, quantity);
+            this.updateQuantity(index, quantity, name, this.actions.add);
           }
         }
       }
@@ -255,52 +262,57 @@ if (!customElements.get('quick-order-list')) {
         this.querySelectorAll('quantity-input').forEach((qty) => {
           const debouncedOnChange = debounce((event) => {
             this.onChange(event);
-          }, 100);
+          }, ON_CHANGE_DEBOUNCE_TIMER);
           qty.addEventListener('change', debouncedOnChange.bind(this));
         });
       }
 
-      renderSections(parsedState, ids) {
-        if (ids) {
-          this.ids.push(ids)
-        }
-        const intersection = this.queue.filter(element => ids.includes(element.id));
-        if (intersection.length === 0) {
-            this.getSectionsToRender().forEach((section) => {
-              const sectionElement = document.getElementById(section.id);
-              if (
-                sectionElement &&
-                sectionElement.parentElement &&
-                sectionElement.parentElement.classList.contains('drawer')
-              ) {
-                parsedState.items.length > 0
-                  ? sectionElement.parentElement.classList.remove('is-empty')
-                  : sectionElement.parentElement.classList.add('is-empty');
-                setTimeout(() => {
-                  document.querySelector('#CartDrawer-Overlay').addEventListener('click', this.cart.close.bind(this.cart));
-                });
-              }
-              const elementToReplace =
-                sectionElement && sectionElement.querySelector(section.selector)
-                  ? sectionElement.querySelector(section.selector)
-                  : sectionElement;
-              if (elementToReplace) {
-                  if (section.selector === `#${this.quickOrderListId} .js-contents` && this.ids.length > 0) {
-                  this.ids.flat().forEach((i) => {
-                    elementToReplace.querySelector(`#Variant-${i}`).innerHTML =
-                    this.getSectionInnerHTML(parsedState.sections[section.section], `#Variant-${i}`);
-                  });
-                } else {
-                  elementToReplace.innerHTML = this.getSectionInnerHTML(
-                    parsedState.sections[section.section],
-                    section.selector
-                  );
-                }
-              }
+      addDebounce(id) {
+        const element = this.querySelector(`#Variant-${id} quantity-input`);
+        const debouncedOnChange = debounce((event) => {
+          this.onChange(event);
+        }, ON_CHANGE_DEBOUNCE_TIMER);
+        element.addEventListener('change', debouncedOnChange.bind(this));
+      }
+
+      renderSections(parsedState, id) {
+        this.getSectionsToRender().forEach((section) => {
+          const sectionElement = document.getElementById(section.id);
+          if (
+            sectionElement &&
+            sectionElement.parentElement &&
+            sectionElement.parentElement.classList.contains('drawer')
+          ) {
+            parsedState.items.length > 0
+              ? sectionElement.parentElement.classList.remove('is-empty')
+              : sectionElement.parentElement.classList.add('is-empty');
+            setTimeout(() => {
+              document.querySelector('#CartDrawer-Overlay').addEventListener('click', this.cart.close.bind(this.cart));
             });
-          this.defineInputsAndQuickOrderTable();
+          }
+          const elementToReplace =
+            sectionElement && sectionElement.querySelector(section.selector)
+              ? sectionElement.querySelector(section.selector)
+              : sectionElement;
+          if (elementToReplace) {
+            if (section.selector === `#${this.quickOrderListId} .js-contents` && id !== undefined) {
+              elementToReplace.querySelector(`#Variant-${id}`).innerHTML = this.getSectionInnerHTML(
+                parsedState.sections[section.section],
+                `#Variant-${id}`
+              );
+            } else {
+              elementToReplace.innerHTML = this.getSectionInnerHTML(
+                parsedState.sections[section.section],
+                section.selector
+              );
+            }
+          }
+        });
+        this.defineInputsAndQuickOrderTable();
+        if (id) {
+          this.addDebounce(id);
+        } else {
           this.addMultipleDebounce();
-          this.ids = []
         }
       }
 
@@ -394,8 +406,8 @@ if (!customElements.get('quick-order-list')) {
         }
       }
 
-      updateMultipleQty(items, ids) {
-        this.querySelector('.variant-remove-total .loading__spinner')?.classList.remove('hidden');
+      updateMultipleQty(items) {
+        this.querySelector('.variant-remove-total .loading__spinner').classList.remove('hidden');
 
         const body = JSON.stringify({
           updates: items,
@@ -412,13 +424,13 @@ if (!customElements.get('quick-order-list')) {
           })
           .then((state) => {
             const parsedState = JSON.parse(state);
-            this.renderSections(parsedState, ids);
-          }).catch(() => {
+            this.renderSections(parsedState);
+          })
+          .catch(() => {
             this.setErrorMessage(window.cartStrings.error);
           })
           .finally(() => {
-            this.querySelector('.variant-remove-total .loading__spinner')?.classList.add('hidden');
-            this.requestStarted = false;
+            this.querySelector('.variant-remove-total .loading__spinner').classList.add('hidden');
           });
       }
 
@@ -428,6 +440,98 @@ if (!customElements.get('quick-order-list')) {
         } else {
           return `${window.location.pathname}`;
         }
+      }
+
+      updateQuantity(id, quantity, name, action) {
+        this.toggleLoading(id, true);
+        this.cleanErrors();
+
+        let routeUrl = routes.cart_change_url;
+        let body = JSON.stringify({
+          quantity,
+          id,
+          sections: this.getSectionsToRender().map((section) => section.section),
+          sections_url: this.getSectionsUrl(),
+        });
+        let fetchConfigType;
+        if (action === this.actions.add) {
+          fetchConfigType = 'javascript';
+          routeUrl = routes.cart_add_url;
+          body = JSON.stringify({
+            items: [
+              {
+                quantity: parseInt(quantity),
+                id: parseInt(id),
+              },
+            ],
+            sections: this.getSectionsToRender().map((section) => section.section),
+            sections_url: this.getSectionsUrl(),
+          });
+        }
+
+        this.updateMessage();
+        this.setErrorMessage();
+
+        fetch(`${routeUrl}`, { ...fetchConfig(fetchConfigType), ...{ body } })
+          .then((response) => {
+            return response.text();
+          })
+          .then((state) => {
+            const parsedState = JSON.parse(state);
+            const quantityElement = document.getElementById(`Quantity-${id}`);
+            const items = document.querySelectorAll('.variant-item');
+
+            if (parsedState.description || parsedState.errors) {
+              const variantItem = document.querySelector(
+                `[id^="Variant-${id}"] .variant-item__totals.small-hide .loading__spinner`
+              );
+              variantItem.classList.add('loading__spinner--error');
+              this.resetQuantityInput(id, quantityElement);
+              if (parsedState.errors) {
+                this.updateLiveRegions(id, parsedState.errors);
+              } else {
+                this.updateLiveRegions(id, parsedState.description);
+              }
+              return;
+            }
+
+            this.classList.toggle('is-empty', parsedState.item_count === 0);
+
+            this.renderSections(parsedState, id);
+
+            let hasError = false;
+
+            const currentItem = parsedState.items.find((item) => item.variant_id === parseInt(id));
+            const updatedValue = currentItem ? currentItem.quantity : undefined;
+            if (updatedValue && updatedValue !== quantity) {
+              this.updateError(updatedValue, id);
+              hasError = true;
+            }
+
+            publish(PUB_SUB_EVENTS.cartUpdate, { source: this.quickOrderListId, cartData: parsedState });
+
+            if (hasError) {
+              this.updateMessage();
+            } else if (action === this.actions.add) {
+              this.updateMessage(parseInt(quantity));
+            } else if (action === this.actions.update) {
+              this.updateMessage(parseInt(quantity - quantityElement.dataset.cartQuantity));
+            } else {
+              this.updateMessage(-parseInt(quantityElement.dataset.cartQuantity));
+            }
+          })
+          .catch((error) => {
+            this.querySelectorAll('.loading__spinner').forEach((overlay) => overlay.classList.add('hidden'));
+            this.resetQuantityInput(id);
+            console.error(error);
+            this.setErrorMessage(window.cartStrings.error);
+          })
+          .finally(() => {
+            this.toggleLoading(id);
+            if (this.lastKey && this.lastElement === id) {
+              this.querySelector(`#Variant-${id} input`).select();
+            }
+          });
       }
 
       resetQuantityInput(id, quantityElement) {
@@ -488,9 +592,9 @@ if (!customElements.get('quick-order-list')) {
         this.updateLiveRegions(id, message);
       }
 
-      cleanErrors(id) {
-        // this.querySelectorAll('.desktop-row-error').forEach((error) => error.classList.add('hidden'));
-        // this.querySelectorAll(`.variant-item__error-text`).forEach((error) => error.innerHTML = '');
+      cleanErrors() {
+        this.querySelectorAll('.desktop-row-error').forEach((error) => error.classList.add('hidden'));
+        this.querySelectorAll(`.variant-item__error-text`).forEach((error) => (error.innerHTML = ''));
       }
 
       updateLiveRegions(id, message) {
